@@ -1,0 +1,13 @@
+```{r read}
+base_df <- read.csv("data_with_topics_pred_changed.csv")
+
+for (i in 1:50) {
+  filename <- paste0("data_with_stay_", i, ".csv")
+  stay_df <- read.csv(filename)
+  stay_col <- paste0("stay_", i)
+  base_df <- cbind(base_df, stay_df[[stay_col]])
+  colnames(base_df)[ncol(base_df)] <- stay_col
+}
+
+write.csv(base_df, "data_with_stay.csv", row.names = FALSE)
+```

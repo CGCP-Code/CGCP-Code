@@ -1,0 +1,27 @@
+```{r read}
+base <- read.csv("data_with_signals_0.csv")
+```
+
+```{r read}
+df1 <- read.csv("data_with_signals_1.csv")
+df2 <- read.csv("data_with_signals_2.csv")
+df3 <- read.csv("data_with_signals_3.csv")
+df4 <- read.csv("data_with_signals_4.csv")
+
+followup_col <- df1$followup
+engagement_col <- df2$engagement
+compliment_col <- df3$compliment
+agreement_col <- df4$agreement
+
+check <- base
+check$followup <- followup_col
+check$engagement <- engagement_col
+check$compliment <- compliment_col
+check$agreement <- agreement_col
+
+```
+
+```{r write}
+write.csv(check, "data_with_all_signals.csv", row.names = FALSE)
+```
+

@@ -1,0 +1,38 @@
+```{r read}
+data <- read.csv("data_for_stay_check.csv")
+```
+
+```{r read}
+data2 <- data %>%
+  filter(status == 'new')
+
+write.csv(data2, "data_churn_check.csv", row.names = FALSE)
+```
+
+```{r read}
+base_df <- read.csv("data_churn_check.csv")
+churn_1 <- read.csv("churn_1.csv")
+churn_2 <- read.csv("churn_2.csv")
+churn_3 <- read.csv("churn_3.csv")
+churn_4 <- read.csv("churn_4.csv")
+churn_5 <- read.csv("churn_5.csv")
+churn_6 <- read.csv("churn_6.csv")
+
+error_col <- churn_1 %>% select(error)
+complex_col <- churn_2 %>% select(complex)
+homogeneity_col <- churn_3 %>% select(homogeneity)
+disengagement_col <- churn_4 %>% select(disengagement)
+frustration_col <- churn_5 %>% select(frustration)
+disagreement_col <- churn_6 %>% select(disagreement)
+
+combined_df <- base_df %>%
+  bind_cols(error_col) %>%
+  bind_cols(complex_col) %>%
+  bind_cols(homogeneity_col) %>%
+  bind_cols(disengagement_col) %>%
+  bind_cols(frustration_col) %>%
+  bind_cols(disagreement_col)
+
+write.csv(combined_df, "data_with_churn.csv", row.names = FALSE)
+write.csv(data, "data_with_topics_pred_changed.csv", row.names = FALSE)
+```

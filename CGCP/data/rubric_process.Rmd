@@ -1,0 +1,58 @@
+```{r read}
+mlp_test_predictions <- read.csv("mlp_test_predictions.csv")
+
+churn <- read.csv("churn.csv")
+stay <- read.csv("stay.csv")
+
+calculate_metrics <- function(actual, predicted) {
+  tp <- sum(actual == 1 & predicted == 1)
+  fp <- sum(actual == 0 & predicted == 1)
+  fn <- sum(actual == 1 & predicted == 0)
+  
+  precision <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+  recall <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+  f1 <- ifelse(precision + recall == 0, 0, 2 * precision * recall / (precision + recall))
+  
+  return(list(precision = precision, recall = recall, f1 = f1))
+}
+metrics_before <- calculate_metrics(mlp_test_predictions$churn, mlp_test_predictions$mlp_pred)
+
+# Initialize count columns
+mlp_test_predictions$count_0 <- 0
+mlp_test_predictions$count_1 <- 0
+
+# Process each row
+for (i in 1:nrow(mlp_test_predictions)) {
+  user_id <- mlp_test_predictions$user_id[i]
+  date <- mlp_test_predictions$date[i]
+  churn_match <- churn[churn$user_id == user_id & churn$date == date, ]
+  if (nrow(churn_match) > 0) {
+    if (any(churn_match[, c( "errors", "negative", "switch", "irrelevant", "complex")] == 1, na.rm = TRUE)) {
+      mlp_test_predictions$count_1[i] <- mlp_test_predictions$count_1[i] + 1
+    }
+  }
+  stay_match <- stay[stay$user_id == user_id & stay$date == date, ]
+  if (nrow(stay_match) > 0) {
+    if (any(stay_match[, c("gratitude", "engagement", "followup", "acceptance", "learning")] == 1, na.rm = TRUE)) {
+      mlp_test_predictions$count_0[i] <- mlp_test_predictions$count_0[i] + 1
+    }
+  }
+}
+
+for (i in 1:nrow(mlp_test_predictions)) {
+  count_0 <- mlp_test_predictions$count_0[i]
+  count_1 <- mlp_test_predictions$count_1[i]
+  
+  if (count_0 > count_1) {
+    mlp_test_predictions$mlp_pred[i] <- 0
+  } else if (count_1 > count_0) {
+    mlp_test_predictions$mlp_pred[i] <- 1
+  }
+}
+
+# Calculate metrics after change
+metrics_after <- calculate_metrics(mlp_test_predictions$churn, mlp_test_predictions$mlp_pred)
+cat("Precision after change:", round(metrics_after$precision, 4), "\n")
+cat("Recall after change:", round(metrics_after$recall, 4), "\n")
+cat("F1 after change:", round(metrics_after$f1, 4), "\n")
+```

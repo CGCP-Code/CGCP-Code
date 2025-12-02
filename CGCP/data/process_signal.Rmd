@@ -1,0 +1,120 @@
+```{r read}
+data <- read.csv("unconfident_predictions_merged.csv")
+whole <- read.csv("whole_data.csv")
+```
+
+```{r read}
+data2 <- data %>%
+  select(user_id, date, status, message = combined_message, conversation, churn, mlp_pred) %>%
+  filter(status != "new") %>%
+  select(-status)
+```
+
+```{r select_rows_from_original_dataset}
+whole2 <- whole %>%
+  select(user_id, date, message = combined_message, conversation, churn)
+```
+
+```{r join_selected_dataset_by_conversation}
+data2$date <- as.Date(data2$date)
+whole2$date <- as.Date(whole2$date)
+
+if (!"mlp_pred" %in% colnames(whole2)) {
+  whole2$mlp_pred <- NA
+}
+result <- data.frame()
+
+for (i in 1:nrow(data2)) {
+  current_row <- data2[i, ]
+  current_user <- current_row$user_id
+  current_date <- current_row$date
+  
+  previous_rows <- whole2 %>%
+    filter(user_id == current_user, date < current_date) %>%
+    arrange(date)
+  
+  if (nrow(previous_rows) > 0) {
+    previous_rows <- previous_rows %>%
+      mutate(
+        mlp_pred = NA,
+        time_diff = as.numeric(difftime(current_date, date, units = "days"))
+      )
+  }
+  current_row$time_diff <- NA
+  
+  if (nrow(previous_rows) > 0) {
+    combined <- bind_rows(previous_rows, current_row)
+  } else {
+    combined <- current_row
+  }
+  result <- bind_rows(result, combined)
+}
+```
+
+```{r process}
+result3 <- result %>%
+  filter(is.na(time_diff) | time_diff <= 3)
+```
+
+```{r write}
+result4 <- result3 %>%
+  mutate(
+    history = sapply(1:n(), function(i) {
+      if (!is.na(mlp_pred[i])) {
+        prev_messages <- c()
+        j <- i - 1
+        
+        while (j >= 1) {
+          if (!is.na(mlp_pred[j])) {
+            break
+          }
+          prev_messages <- c(conversation[j], prev_messages)
+          j <- j - 1
+        }
+        
+        if (length(prev_messages) > 0) {
+          paste(prev_messages, collapse = " ")
+        } else {
+          NA_character_
+        }
+      } else {
+        NA_character_
+      }
+    })
+  )
+```
+
+```{r write}
+result5 <- result4 %>%
+  mutate(
+    history_message = sapply(1:n(), function(i) {
+      if (!is.na(mlp_pred[i])) {
+        prev_messages <- c()
+        j <- i - 1
+        
+        while (j >= 1) {
+          if (!is.na(mlp_pred[j])) {
+            break
+          }
+          prev_messages <- c(message[j], prev_messages)
+          j <- j - 1
+        }
+        
+        if (length(prev_messages) > 0) {
+          paste(prev_messages, collapse = " ")
+        } else {
+          NA_character_
+        }
+      } else {
+        NA_character_
+      }
+    })
+  )
+```
+
+```{r write}
+result6 <- result5 %>%
+  filter(!is.na(mlp_pred))
+
+write.csv(result6, "data_with_signals_0.csv", row.names = FALSE)
+```

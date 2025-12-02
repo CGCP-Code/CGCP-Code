@@ -1,0 +1,49 @@
+```{r read}
+data <- read.csv("unconfident_predictions.csv")
+stay <- read.csv("data_with_all_signals.csv")
+```
+
+```{r select_rows_from_original_dataset}
+data2 <- data %>%
+  select(user_id, date, status, message = combined_message, conversation, churn, mlp_pred) %>%
+  filter(status != 'active')
+```
+
+```{r select_rows_from_original_dataset}
+stay2 <- stay %>%
+  filter(agreement == 0 & engagement == 0 & followup == 0 & compliment == 0) %>%
+  select(user_id, date, message, conversation, churn, mlp_pred, history_message)
+```
+
+```{r combine history message into message}
+renumber_messages <- function(text) {
+  text <- str_replace_all(text, " (\\d+):", "\n\\1:")
+  lines <- str_split(text, "\n")[[1]]
+  lines <- lines[lines != ""]
+  
+  renumbered <- sapply(seq_along(lines), function(i) {
+    str_replace(lines[i], "^\\d+:", paste0(i, ":"))
+  })
+  return(paste(renumbered, collapse = "\n"))
+}
+
+stay3 <- stay2 %>%
+  mutate(
+    message = paste(history_message, message, sep = "\n"),
+    message = sapply(message, renumber_messages, USE.NAMES = FALSE)
+  )
+```
+
+
+```{r process}
+stay4 <- stay3 %>%
+  select(-history_message)
+stay4 <- stay4 %>%
+  mutate(status = "active")
+
+data3 <- rbind(stay4, data2)
+```
+
+```{r write}
+write.csv(data3, "data_for_stay_check.csv", row.names = FALSE)
+```

@@ -1,0 +1,60 @@
+```{r read}
+signal <- read.csv("data_with_all_signals.csv")
+stay <- read.csv("data_with_stay.csv")
+churn <- read.csv("data_with_churn.csv")
+pred <- read.csv("unconfident_predictions.csv")
+data <- read.csv("mlp_test_predictions.csv")
+```
+
+```{r read}
+pred <- merge(pred, signal[, c("user_id", "date", "followup", "engagement", "agreement", "compliment")], 
+              by = c("user_id", "date"), 
+              all.x = TRUE)
+
+stay_cols <- c("user_id", "date", paste0("stay_", 1:50))
+pred <- merge(pred, stay[, stay_cols], 
+              by = c("user_id", "date"), 
+              all.x = TRUE)
+
+pred <- merge(pred, churn[, c("user_id", "date", "error", "complex", "homogeneity", "disengagement", "frustration", "disagreement")], 
+              by = c("user_id", "date"), 
+              all.x = TRUE)
+```
+
+```{r select_rows_from_original_dataset}
+condition1 <- pred$status != 'new'
+pred$mlp_pred[condition1] <- 1
+
+condition2 <- pred$followup == 1 | pred$engagement ==1 | pred$agreement == 1 | pred$compliment == 1
+pred$mlp_pred[condition2] <- 0
+
+condition3 <- pred$status == 'new' & 
+              (pred$error == 1 | pred$complex == 1 | pred$homogeneity == 1 | pred$frustration == 1 | pred$disagreement == 1)
+pred$mlp_pred[condition3] <- 1
+
+stay_cols <- paste0("stay_", 1:50)
+any_stay_1 <- apply(pred[, stay_cols], 1, function(x) any(x == 1, na.rm = TRUE))
+pred$mlp_pred[any_stay_1] <- 0
+```
+
+```{r select_rows_from_original_dataset}
+data$mlp_pred_original <- data$mlp_pred
+data <- data %>%
+  left_join(pred %>% select(user_id, date, mlp_pred_new = mlp_pred),
+            by = c("user_id", "date")) %>%
+  mutate(mlp_pred = ifelse(!is.na(mlp_pred_new), mlp_pred_new, mlp_pred)) %>%
+  select(-mlp_pred_new)
+
+true_positive <- sum(data$mlp_pred == 1 & data$churn == 1, na.rm = TRUE)
+false_positive <- sum(data$mlp_pred == 1 & data$churn == 0, na.rm = TRUE)
+false_negative <- sum(data$mlp_pred == 0 & data$churn == 1, na.rm = TRUE)
+
+precision <- true_positive / (true_positive + false_positive)
+recall <- true_positive / (true_positive + false_negative)
+f1 <- 2 * (precision * recall) / (precision + recall)
+
+cat("Precision (Class 1):", round(precision, 4), "\n")
+cat("Recall (Class 1):", round(recall, 4), "\n")
+cat("F1 Score (Class 1):", round(f1, 4), "\n")
+```
+

@@ -1,0 +1,295 @@
+```{r read}
+data <- read.csv("data_follow_pseudo2.csv")
+```
+
+```{r read}
+conversation <- read.csv("chat_conversation.csv")
+message <- read.csv("chat_message.csv")
+```
+
+```{r select_rows_from_original_dataset}
+conversation <- conversation %>%
+  select(conversation_id = id, user_id)
+message <- message %>%
+  select(message = original_message, response = message_response, conversation_id, message_time = created_on, message_id = id)
+```
+
+```{r join_selected_dataset_by_conversation}
+combined_df <- message %>%
+  inner_join(conversation, by = "conversation_id") %>%
+  select(user_id, message, message_time, response, message_id)
+
+
+combined_df <- combined_df %>%
+  arrange(user_id, message_time) %>%
+  group_by(user_id)
+
+```
+
+```{r write}
+message <- combined_df %>%
+  mutate(message_time = ymd_hms(message_time, tz = "UTC"), date = as.Date(message_time))
+
+message2 <- message %>%
+  filter(date >= as.Date("2024-12-11"))
+```
+
+```{r write}
+data <- data %>%
+  mutate(message_time = as.POSIXct(message_time, tz = "UTC"))
+data <- data %>%
+  mutate(date = as.Date(message_time))
+data2 <- bind_rows(message2, data)
+
+```
+
+```{r process}
+data2 <- data2 %>%
+  mutate(
+    translated_message  = ifelse(is.na(translated_message) | trimws(translated_message) == "", "EMPTY", translated_message),
+    translated_response = ifelse(is.na(translated_response) | trimws(translated_response) == "", "EMPTY", translated_response)
+  )
+
+format_list <- function(texts) {
+  paste0(seq_along(texts), ": ", texts, collapse = "\n")
+}
+
+format_conversation <- function(qs, rs) {
+  n <- max(length(qs), length(rs))
+  qs <- ifelse(is.na(qs), "EMPTY", qs)
+  rs <- ifelse(is.na(rs), "EMPTY", rs)
+  lines <- paste0("{Question ", seq_len(n), ": ", qs, ", Response ", seq_len(n), ": ", rs, "}")
+  paste(lines, collapse = "\n")
+}
+
+combined_data <- data2 %>%
+  group_by(user_id, date) %>%
+  summarise(
+    num_message = n(),
+    start_time = min(message_time),
+    end_time   = max(message_time),
+    combined_message  = format_list(translated_message),
+    combined_response = format_list(translated_response),
+    conversation = format_conversation(translated_message, translated_response),
+    has_followup_seq = paste(has_followup, collapse = ","),
+    has_system_followup_seq = paste(has_system_followup, collapse = ","),
+    triggered_seq = paste(triggered, collapse = ","),
+    accurate_seq = paste(pseudo_feedback_response_accurate, collapse = ","),
+    unclear_seq = paste(pseudo_feedback_negative_response_unclear, collapse = ","),
+    .groups = "drop"
+  )
+
+```
+
+```{r write}
+combined_data2 <- combined_data %>%
+  group_by(user_id) %>%
+  mutate(
+    next_date = lead(date),
+    churn = ifelse(!is.na(next_date) & as.numeric(difftime(next_date, date, units = "days")) <= 7, 0, 1)
+  ) %>%
+  ungroup() %>%
+  select(-next_date)
+```
+
+```{r write}
+data2 <- combined_data2 %>%
+  mutate(date = as.Date(date)) %>%
+  filter(date < as.Date("2024-12-11"))
+```
+
+```{r write}
+comeback_stats <- data2 %>%
+  group_by(date) %>%
+  summarise(
+    total = n(),
+    num_comeback = sum(churn),
+    pct_comeback = 100 * num_comeback / total
+  )
+
+ggplot(comeback_stats, aes(x = date, y = pct_comeback)) +
+  geom_line(color = "steelblue", size = 1) +
+  geom_point(color = "steelblue") +
+  labs(
+    title = "Percentage of Comebacks (within 3 days) by Date (Before 2025-01-01)",
+    x = "Date",
+    y = "Percentage Comeback (%)"
+  ) +
+  theme_minimal()
+
+```
+
+```{r read_demographics_datasets}
+user <- read.csv("user_management_user.csv")
+userprofile <- read.csv("user_management_userprofile.csv")
+```
+
+```{r combine_dataset_with_demographics}
+user <- user %>%
+  rename(
+    user_id = id,
+    signup_date = created_on
+  )
+
+userprofile <- userprofile %>%
+  rename(
+    user_id = user_id_id
+  )
+
+joined_df <- data2 %>%
+  left_join(
+    user %>% select(user_id, signup_date, preferred_language_id),
+    by = "user_id"
+  )
+
+data3 <- joined_df %>%
+  left_join(
+    userprofile %>% select(user_id, country_id, gender, age, role, land_holding, geography_level2_id, show_feedback_prompt, receive_com_via_whatsapp, specialization),
+    by = "user_id"
+  )
+
+```
+
+
+```{r get_number_of_past_messages}
+data3$num_past_message <- 0
+data3$num_past_yd <- 0
+data3$num_past_recent <- 0
+
+
+data3 <- data3 %>%
+  mutate(date = as.Date(date)) %>%
+  arrange(user_id, date)
+
+data3 <- data3 %>%
+  group_by(user_id) %>%
+  arrange(date) %>%
+  mutate(
+    num_past_message = row_number() - 1,
+    num_past_recent = sapply(seq_along(date), function(i) {
+      sum(date[1:(i-1)] >= (date[i] - days(14)))
+    }),
+    num_past_yd = sapply(seq_along(date), function(i) {
+      sum(date[1:(i-1)] >= (date[i] - days(1)))
+    })
+  ) %>%
+  ungroup()
+```
+
+```{r get_age_range}
+data3 <- data3 %>%
+  group_by(user_id) %>%
+  arrange(date) %>%
+  mutate(
+    has_past_yd = ifelse(num_past_yd > 0, 1, 0),
+    has_past    = ifelse(num_past_message > 0, 1, 0),
+    has_past_recent = ifelse(num_past_recent > 0, 1, 0)
+  ) %>%
+  ungroup()
+
+```
+
+```{r get_age_range}
+data4 <- data3 %>%
+  mutate(
+    num_weather = str_count(combined_message, "weather"),
+    weather = ifelse(num_weather >= 2, 1, 0)
+  )
+
+weather_comeback_stats <- data4 %>%
+  filter(weather == 1) %>%
+  summarise(
+    total_rows = n(),
+    num_comeback = sum(churn),
+    pct_comeback = 100 * num_comeback / total_rows
+  )
+```
+
+```{r get_age_range}
+data5 <- data4 %>%
+  mutate(weather2 = ifelse(str_count(str_to_lower(combined_response), "weather") >= 3, 1, 0))
+
+weather_comeback_stats <- data5 %>%
+  filter(weather2 == 1) %>%
+  summarise(
+    total_rows = n(),
+    num_comeback = sum(churn),
+    pct_comeback = 100 * num_comeback / total_rows
+  )
+```
+
+```{r get_age_range}
+library(purrr)
+
+data6 <- data5 %>%
+  rowwise() %>%
+  mutate(
+    num_has_followup = sum(as.numeric(str_split(has_followup_seq, ",")[[1]])),
+    num_has_system_followup = sum(as.numeric(str_split(has_system_followup_seq, ",")[[1]])),
+    num_triggered = sum(as.numeric(str_split(triggered_seq, ",")[[1]])),
+    num_accurate = sum(as.numeric(str_split(accurate_seq, ",")[[1]])),
+    num_unclear = sum(as.numeric(str_split(unclear_seq, ",")[[1]])),
+    
+    pct_has_followup = round(mean(as.numeric(str_split(has_followup_seq, ",")[[1]])), 2),
+    pct_has_system_followup = round(mean(as.numeric(str_split(has_system_followup_seq, ",")[[1]])), 2),
+    pct_triggered = round(mean(as.numeric(str_split(triggered_seq, ",")[[1]])), 2)
+  ) %>%
+  ungroup()
+
+```
+
+```{r get_age_range}
+data7 <- data6 %>%
+  mutate(no_followup = ifelse(pct_has_followup == 0, 1, 0))
+
+```
+
+```{r get_age_range}
+data8 <- data7 %>%
+  mutate(
+    pct_triggered2 = ifelse(num_has_followup > 0,
+                            round(num_triggered / num_has_followup, 2),
+                            NA)
+  )
+```
+
+```{r get_age_range}
+data8$pct_accurate <- data8$num_accurate / data8$num_message
+data8$pct_unclear  <- data8$num_unclear  / data8$num_message
+
+```
+
+```{r get_age_range}
+plot_data <- data8 %>%
+  filter(has_past == 0) %>%
+  group_by(date) %>%
+  summarise(count = n()) %>%
+  ungroup()
+
+# Plot
+ggplot(plot_data, aes(x = date, y = count)) +
+  geom_line(color = "steelblue") +
+  geom_point() +
+  labs(title = "Number of Rows with has_past == 0 Over Time",
+       x = "Date", y = "Count") +
+  theme_minimal()
+```
+
+```{r read}
+data9 <- data8 %>%
+  mutate(
+    start_time = ymd_hms(start_time),
+    end_time = ymd_hms(end_time),
+    time_gap = as.numeric(difftime(end_time, start_time, units = "mins"))
+  )
+```
+
+```{r categorical}
+cutoff_date <- as.Date("2024-11-21")
+train_data <- data9 %>% filter(date < cutoff_date)
+test_data  <- data9 %>% filter(date >= cutoff_date)
+
+write.csv(train_data, "train.csv", row.names = FALSE)
+write.csv(test_data, "test.csv", row.names = FALSE)
+write.csv(data9, "whole_data.csv", row.names = FALSE)
+```
